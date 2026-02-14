@@ -112,7 +112,7 @@ def sources_panel(context_docs):
 
 settings = Settings()
 
-# ---------------- Startup cleanup: keep only kb_default across restarts ----------------
+# ---------------- Startup cleanup: keep only kb_default across restarts -----------------
 PERSISTENT_COLLECTIONS = {"kb_default"}  # only this survives app restarts
 
 def cleanup_temporary_collections_once_per_process(settings):
@@ -1009,3 +1009,4 @@ elif page == "RAG Evaluation":
 
             except Exception as e:
                 st.error(str(e))
+
