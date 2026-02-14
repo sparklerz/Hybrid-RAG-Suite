@@ -9,10 +9,11 @@ jobs:
   sync-to-hub:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
+      - name: Checkout (with LFS)
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          lfs: true
 
       - name: Install git-lfs + git-xet
         run: |
@@ -21,21 +22,15 @@ jobs:
           sudo apt-get install -y git-lfs unzip curl
           git lfs install
 
-          # Install git-xet (HF official installer)
+          # Install git-xet (official HF installer)
           curl --proto '=https' --tlsv1.2 -sSf \
-            https://raw.githubusercontent.com/huggingface/xet-core/main/git_xet/install.sh | sh
+            https://raw.githubusercontent.com/huggingface/xet-core/refs/heads/main/git_xet/install.sh | sh
 
-          # Ensure it's on PATH (installer often uses ~/.local/bin)
-          echo "$HOME/.local/bin" >> $GITHUB_PATH
-
-          # Activate filters (this is the key part)
+          # Verify
           git-xet --version
-          git-xet install
+          git lfs ls-files || true
 
-          # Sanity check: confirm your PDF is using xet filter
-          git check-attr filter -- kb_default/thirukkural_commentary.pdf
-
-      - name: Push to Hugging Face Space (clean snapshot)
+      - name: Push to HF Space (clean snapshot)
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
@@ -46,7 +41,7 @@ jobs:
           git remote remove hf 2>/dev/null || true
           git remote add hf https://ash001:${HF_TOKEN}@huggingface.co/spaces/ash001/Hybrid_RAG_Suite
 
-          # Push without old history (avoids old commits with non-xet PDF blobs)
+          # Snapshot deploy (avoids old history blobs)
           git checkout --orphan hf-deploy
           git add -A
           git commit -m "Deploy"
