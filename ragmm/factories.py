@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from langchain_groq import ChatGroq
-from langchain_openai import OpenAIEmbeddings
 from langchain_huggingface import HuggingFaceEmbeddings
 
 from .settings import Settings
@@ -19,11 +18,6 @@ def get_llm(settings: Settings, *, model: str | None = None, streaming: bool = T
 
 def get_embeddings(settings: Settings):
     provider = settings.embed_provider.lower().strip()
-
-    # if provider == "openai":
-    #     if not settings.openai_api_key:
-    #         raise ValueError("Missing OPENAI_API_KEY for OpenAI embeddings.")
-    #     return OpenAIEmbeddings()
 
     if provider == "huggingface":
         # HF_TOKEN is optional depending on environment/model
