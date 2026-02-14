@@ -1,20 +1,53 @@
 name: Sync to Hugging Face hub
+
 on:
   push:
     branches: [main]
-
-  # to run this workflow manually from the Actions tab
   workflow_dispatch:
 
 jobs:
   sync-to-hub:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - name: Checkout
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          lfs: true
-      - name: Push to hub
+
+      - name: Install git-lfs + git-xet
+        run: |
+          set -euxo pipefail
+          sudo apt-get update
+          sudo apt-get install -y git-lfs unzip curl
+          git lfs install
+
+          # Install git-xet (HF official installer)
+          curl --proto '=https' --tlsv1.2 -sSf \
+            https://raw.githubusercontent.com/huggingface/xet-core/main/git_xet/install.sh | sh
+
+          # Ensure it's on PATH (installer often uses ~/.local/bin)
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+          # Activate filters (this is the key part)
+          git-xet --version
+          git-xet install
+
+          # Sanity check: confirm your PDF is using xet filter
+          git check-attr filter -- kb_default/thirukkural_commentary.pdf
+
+      - name: Push to Hugging Face Space (clean snapshot)
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
-        run: git push https://ash001:$HF_TOKEN@huggingface.co/spaces/ash001/Hybrid_RAG_Suite main
+        run: |
+          set -euxo pipefail
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+
+          git remote remove hf 2>/dev/null || true
+          git remote add hf https://ash001:${HF_TOKEN}@huggingface.co/spaces/ash001/Hybrid_RAG_Suite
+
+          # Push without old history (avoids old commits with non-xet PDF blobs)
+          git checkout --orphan hf-deploy
+          git add -A
+          git commit -m "Deploy"
+          git push --force hf hf-deploy:main
