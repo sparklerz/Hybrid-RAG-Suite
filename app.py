@@ -889,8 +889,8 @@ elif page == "Web Search Chat":
             st.error(str(e))
 
 elif page == "Summarizer":
-    st.title("📝 URL / YouTube Summarizer")
-    st.write("Paste a YouTube or website URL, and get a concise summary.")
+    st.title("📝 Website Summarizer")
+    st.write("Paste a Website URL, and get a concise summary.")
 
     # --- Session control (right side) ---
     sum_collection = "__summarizer__"
@@ -932,7 +932,7 @@ elif page == "Summarizer":
 
     # --- Existing UI stays on the left ---
     with left:
-        url = st.text_input("URL (YouTube or website)", key=f"summarizer_url::{active_session}")
+        url = st.text_input("Website URL", key=f"summarizer_url::{active_session}")
         if st.button("Summarize", type="primary", disabled=not url):
             try:
                 llm = get_llm(settings, model=llm_model, streaming=False)
