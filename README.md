@@ -14,7 +14,7 @@ tags:
   - hybrid-search
   - groq
 pinned: false
-short_description: A Streamlit RAG app with Dense/BM25/Hybrid retrieval, optional reranking, web+wiki+arXiv chat, summarizer, and evals.
+short_description: A Streamlit RAG app.
 license: agpl-3.0
 ---
 
