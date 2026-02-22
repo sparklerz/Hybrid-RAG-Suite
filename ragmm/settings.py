@@ -13,7 +13,7 @@ class Settings:
 
     # LLM
     groq_api_key: str | None = os.getenv("GROQ_API_KEY")
-    llm_model: str = os.getenv("LLM_MODEL", "Llama3-8b-8192")
+    llm_model: str = os.getenv("LLM_MODEL", "moonshotai/kimi-k2-instruct-0905")
 
     # Embeddings
     embed_provider: str = os.getenv("EMBED_PROVIDER", "huggingface")  # huggingface|openai
