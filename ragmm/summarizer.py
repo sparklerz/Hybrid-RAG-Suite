@@ -36,17 +36,82 @@ def _fetch_youtube_transcript(url: str, preferred_langs: List[str] | None = None
 
     preferred_langs = preferred_langs or ["en", "en-US", "en-GB"]
 
+    # Option B: try alternate YouTube hosts by patching youtube_transcript_api settings
     try:
-        ytt_api = YouTubeTranscriptApi()
-        fetched = ytt_api.fetch(vid, languages=preferred_langs)  # ✅ new API
-    except getattr(yta, "TranscriptsDisabled", Exception):
-        raise ValueError("Transcripts are disabled for this video.")
-    except getattr(yta, "NoTranscriptFound", Exception):
-        raise ValueError("No transcript found for this video.")
-    except getattr(yta, "CouldNotRetrieveTranscript", Exception) as e:
-        raise ValueError(f"Could not retrieve transcript (blocked / unavailable): {e}")
-    except Exception as e:
-        raise RuntimeError(f"Unexpected YouTube transcript error: {e}")
+        import youtube_transcript_api._settings as yts_settings
+    except Exception:
+        yts_settings = None  # if settings module isn't available, fall back to single attempt
+
+    TranscriptsDisabled = getattr(yta, "TranscriptsDisabled", Exception)
+    NoTranscriptFound = getattr(yta, "NoTranscriptFound", Exception)
+    CouldNotRetrieveTranscript = getattr(yta, "CouldNotRetrieveTranscript", Exception)
+
+    def _looks_like_dns_error(e: Exception) -> bool:
+        s = (str(e) or "").lower()
+        r = (repr(e) or "").lower()
+        needles = [
+            "failed to resolve",
+            "nameresolutionerror",
+            "no address associated with hostname",
+            "temporary failure in name resolution",
+            "name or service not known",
+            "getaddrinfo failed",
+            "gaierror",
+            "errno -5",
+        ]
+        return any(n in s for n in needles) or any(n in r for n in needles)
+
+    def _set_host(host: str) -> None:
+        if not yts_settings:
+            return
+        # Known constants in youtube_transcript_api/_settings.py:
+        # WATCH_URL = "https://www.youtube.com/watch?v={video_id}"
+        # INNERTUBE_API_URL = "https://www.youtube.com/youtubei/v1/player?key={api_key}"
+        if hasattr(yts_settings, "WATCH_URL"):
+            yts_settings.WATCH_URL = f"https://{host}/watch?v={{video_id}}"
+        if hasattr(yts_settings, "INNERTUBE_API_URL"):
+            yts_settings.INNERTUBE_API_URL = f"https://{host}/youtubei/v1/player?key={{api_key}}"
+
+    # Put the most likely-to-work hosts first
+    hosts = ["youtube.com", "m.youtube.com", "www.youtube.com"] if yts_settings else ["www.youtube.com"]
+
+    last_err: Exception | None = None
+    fetched = None
+
+    for host in hosts:
+        _set_host(host)
+        try:
+            ytt_api = YouTubeTranscriptApi()
+            fetched = ytt_api.fetch(vid, languages=preferred_langs)  # ✅ new API
+            break  # success
+        except TranscriptsDisabled:
+            raise ValueError("Transcripts are disabled for this video.")
+        except NoTranscriptFound:
+            raise ValueError("No transcript found for this video.")
+        except CouldNotRetrieveTranscript as e:
+            # If it's a DNS/resolve failure, try the next host
+            if _looks_like_dns_error(e):
+                last_err = e
+                continue
+            raise ValueError(f"Could not retrieve transcript (blocked / unavailable): {e}")
+        except Exception as e:
+            # If it's a DNS/resolve failure, try the next host
+            if _looks_like_dns_error(e):
+                last_err = e
+                continue
+            raise RuntimeError(f"Unexpected YouTube transcript error: {e}")
+
+    if fetched is None:
+        # All hosts failed (most commonly: HF Spaces can't resolve/reach YouTube)
+        if last_err is not None:
+            raise RuntimeError(
+                "YouTube transcript fetch failed because this environment can't resolve/reach YouTube "
+                f"(tried: {', '.join(hosts)}). Last error: {last_err}"
+            )
+        raise RuntimeError(
+            "YouTube transcript fetch failed (no transcript fetched) after trying: "
+            + ", ".join(hosts)
+        )
 
     # fetched is a FetchedTranscript object (iterable of snippet objects)
     try:

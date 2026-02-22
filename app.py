@@ -28,7 +28,7 @@ from ragmm.rerank import CrossEncoderReranker, RerankRetriever
 from pathlib import Path
 import hashlib
 
-st.set_page_config(page_title="Production-Grade Multi-Modal RAG", page_icon="📚", layout="wide")
+st.set_page_config(page_title="Hybrid RAG Suite", page_icon="📚", layout="wide")
 
 st.markdown(
     """
@@ -145,7 +145,7 @@ def cleanup_temporary_collections_once_per_process(settings):
 cleanup_temporary_collections_once_per_process(settings)
 
 # ---------------- Sidebar ----------------
-st.sidebar.title("📚 Multi-Modal RAG Suite")
+st.sidebar.title("📚 Hybrid RAG Suite")
 
 page = st.sidebar.radio(
     "Navigation",
