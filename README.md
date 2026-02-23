@@ -115,7 +115,7 @@ GROQ_API_KEY=your_key_here
 # Optional
 LLM_MODEL=moonshotai/kimi-k2-instruct-0905
 EMBED_PROVIDER=huggingface
-HF_TOKEN=
+HF_TOKEN=your_token_here
 CHROMA_DIR=./data/chroma
 ARTIFACTS_DIR=./data/artifacts
 KB_PDF_DIR=./kb_default
