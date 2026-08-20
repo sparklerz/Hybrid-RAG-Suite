@@ -113,7 +113,7 @@ Create a `.env` file:
 GROQ_API_KEY=your_key_here
 
 # Optional
-LLM_MODEL=moonshotai/kimi-k2-instruct-0905
+LLM_MODEL=openai/gpt-oss-120b
 EMBED_PROVIDER=huggingface
 HF_TOKEN=your_token_here
 CHROMA_DIR=./data/chroma
@@ -136,7 +136,7 @@ streamlit run app.py
 | Variable | Default | Purpose |
 |---|---:|---|
 | `GROQ_API_KEY` | (none) | **Required**. Enables Groq LLM calls |
-| `LLM_MODEL` | `moonshotai/kimi-k2-instruct-0905` | Default Groq model |
+| `LLM_MODEL` | `openai/gpt-oss-120b` | Default Groq model |
 | `EMBED_PROVIDER` | `huggingface` | Embeddings provider (currently HF only) |
 | `HF_TOKEN` | (none) | Optional Hugging Face token |
 | `CHROMA_DIR` | `./data/chroma` | Chroma persistent directory |
