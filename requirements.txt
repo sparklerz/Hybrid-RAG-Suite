@@ -15,7 +15,7 @@ pypdf>=4.2.0
 tiktoken>=0.7.0
 sentence-transformers
 
-ddgs
+ddgs>=9.0
 wikipedia>=1.4.0
 arxiv>=2.1.0
 validators>=0.28.0

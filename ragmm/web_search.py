@@ -52,15 +52,30 @@ _WIKI_CACHE_MAX = 128
 _WIKI_LOCK = threading.Lock()
 
 
+# ddgs>=9 is a metasearch wrapper over several engines, not just DuckDuckGo.
+# Its "auto" backend forces `wikipedia` and `grokipedia` to the front of the
+# queue, and both currently return nothing, so a search can fail fast with
+# "No results found." before a working engine is ever reached. Naming the
+# engines that actually answer skips that dead prefix.
+_DDG_BACKENDS = os.getenv("DDG_BACKENDS", "duckduckgo,brave,yahoo")
+
+
 # ---------- Tool implementations with hard timeouts ----------
 def _ddg_search(query: str, *, max_results: int, timeout_s: float) -> str:
-    rows = []
     with DDGS(timeout=timeout_s) as ddgs:
-        for r in ddgs.text(query, max_results=max_results):
-            title = r.get("title", "")
-            href = r.get("href", "")
-            body = r.get("body", "")
-            rows.append(f"- {title}\n  {href}\n  {body}".strip())
+        try:
+            hits = ddgs.text(query, max_results=max_results, backend=_DDG_BACKENDS)
+        except Exception:
+            # Either every named engine was rate-limited, or this is a pre-9.x
+            # ddgs that rejects a comma-joined backend list. Let it choose.
+            hits = ddgs.text(query, max_results=max_results)
+
+    rows = []
+    for r in hits:
+        title = r.get("title", "")
+        href = r.get("href", "")
+        body = r.get("body", "")
+        rows.append(f"- {title}\n  {href}\n  {body}".strip())
     return "\n\n".join(rows)
 
 
