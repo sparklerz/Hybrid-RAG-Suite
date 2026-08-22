@@ -20,6 +20,9 @@ class Settings:
     hf_token: str | None = os.getenv("HF_TOKEN")
     # openai_api_key: str | None = os.getenv("OPENAI_API_KEY")
 
+    # Web search (falls back to ddgs when unset)
+    tavily_api_key: str | None = os.getenv("TAVILY_API_KEY")
+
     # Defaults
     kb_pdf_dir: str = os.getenv("KB_PDF_DIR", "./kb_default")
 

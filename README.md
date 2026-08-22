@@ -77,8 +77,15 @@ This repo is configured for **Docker Spaces** using the .github/workflows/main.y
 In your Space: **Settings → Variables and secrets**
 - Add **Secret**: `GROQ_API_KEY` (required)
 
+- Add **Secret**: `TAVILY_API_KEY` (recommended on Spaces)
+
 Optional (only if needed by your environment/models):
 - `HF_TOKEN`
+
+> **Why Tavily on Spaces:** without a key, web search falls back to `ddgs`, which
+> scrapes consumer search engines. Those block datacenter IPs, so search fails
+> intermittently on Spaces regardless of configuration. A key authenticates by
+> account rather than source IP. Free tier covers ~1000 searches/month.
 
 ### 3) (Recommended) Use `/data` for persistence
 If you enable persistent storage for the Space, Hugging Face mounts it at `/data`.
@@ -111,6 +118,7 @@ pip install -r requirements.txt
 Create a `.env` file:
 ```bash
 GROQ_API_KEY=your_key_here
+TAVILY_API_KEY=your_key_here
 
 # Optional
 LLM_MODEL=openai/gpt-oss-120b
@@ -139,6 +147,8 @@ streamlit run app.py
 | `LLM_MODEL` | `openai/gpt-oss-120b` | Default Groq model |
 | `EMBED_PROVIDER` | `huggingface` | Embeddings provider (currently HF only) |
 | `HF_TOKEN` | (none) | Optional Hugging Face token |
+| `TAVILY_API_KEY` | (none) | Web search provider. Unset falls back to `ddgs`, unreliable on hosted platforms |
+| `DDG_BACKENDS` | `duckduckgo,brave,yahoo` | `ddgs` engines to try, comma-separated |
 | `CHROMA_DIR` | `./data/chroma` | Chroma persistent directory |
 | `ARTIFACTS_DIR` | `./data/artifacts` | BM25/docstore artifacts directory |
 | `KB_PDF_DIR` | `./kb_default` | Folder containing KB PDFs |

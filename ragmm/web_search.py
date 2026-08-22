@@ -59,15 +59,28 @@ _WIKI_LOCK = threading.Lock()
 # engines that actually answer skips that dead prefix.
 _DDG_BACKENDS = os.getenv("DDG_BACKENDS", "duckduckgo,brave,yahoo")
 
+# Preferred web search. Set TAVILY_API_KEY to use it; ddgs is the fallback.
+_TAVILY_API_KEY = os.getenv("TAVILY_API_KEY")
+
 
 # ---------- Tool implementations with hard timeouts ----------
 def _ddg_search(query: str, *, max_results: int, timeout_s: float) -> str:
-    with DDGS(timeout=timeout_s) as ddgs:
+    # DDGS(timeout=...) bounds each *wave* of engines, not the whole search. ddgs
+    # runs ceil(max_results/10)+1 engines at a time, so three backends take two
+    # waves and the true ceiling is 2x timeout -- 12s for a 6s timeout, which
+    # blows the caller's overall budget. Size the wave so both fit.
+    deadline = time.monotonic() + timeout_s
+    wave_timeout = max(2.0, timeout_s / 2)
+
+    with DDGS(timeout=wave_timeout) as ddgs:
         try:
             hits = ddgs.text(query, max_results=max_results, backend=_DDG_BACKENDS)
         except Exception:
             # Either every named engine was rate-limited, or this is a pre-9.x
-            # ddgs that rejects a comma-joined backend list. Let it choose.
+            # ddgs that rejects a comma-joined backend list. Retrying on its own
+            # picks costs another full round, so only do it if the budget allows.
+            if deadline - time.monotonic() < wave_timeout:
+                raise
             hits = ddgs.text(query, max_results=max_results)
 
     rows = []
@@ -77,6 +90,53 @@ def _ddg_search(query: str, *, max_results: int, timeout_s: float) -> str:
         body = r.get("body", "")
         rows.append(f"- {title}\n  {href}\n  {body}".strip())
     return "\n\n".join(rows)
+
+
+def _tavily_search(query: str, *, max_results: int, timeout_s: float) -> str:
+    """Tavily REST API. Called directly rather than through langchain-tavily so
+    the request stays inside this module's timeout budget."""
+    r = requests.post(
+        "https://api.tavily.com/search",
+        json={"query": query, "max_results": max_results, "search_depth": "basic"},
+        headers={"Authorization": f"Bearer {_TAVILY_API_KEY}"},
+        timeout=timeout_s,
+    )
+    r.raise_for_status()
+
+    hits = r.json().get("results", []) or []
+    if not hits:
+        return "No results found."
+
+    rows = []
+    for h in hits[:max_results]:
+        title = h.get("title", "")
+        url = h.get("url", "")
+        body = h.get("content", "")
+        rows.append(f"- {title}\n  {url}\n  {body}".strip())
+    return "\n\n".join(rows)
+
+
+def _web_search(query: str, *, max_results: int, timeout_s: float) -> str:
+    """Tavily when a key is configured, ddgs otherwise.
+
+    ddgs scrapes consumer search engines, and those block datacenter egress, so
+    it is unreliable on hosted platforms (HF Spaces, Streamlit Cloud, Colab)
+    where the outbound IP is shared and cloud-owned. An API key authenticates by
+    account rather than by source IP, so it behaves the same everywhere.
+    """
+    if not _TAVILY_API_KEY:
+        return _ddg_search(query, max_results=max_results, timeout_s=timeout_s)
+
+    deadline = time.monotonic() + timeout_s
+    try:
+        return _tavily_search(query, max_results=max_results, timeout_s=timeout_s)
+    except Exception:
+        # Out of quota or Tavily is down. ddgs may still work depending on where
+        # this is deployed, but only try if there is budget left for it.
+        remaining = deadline - time.monotonic()
+        if remaining < 2.0:
+            raise
+        return _ddg_search(query, max_results=max_results, timeout_s=remaining)
 
 
 def _wiki_summary(query: str, *, timeout_s: float) -> str:
@@ -244,7 +304,7 @@ def search_web_wiki_arxiv(
 
     # Always do web
     tasks: List[tuple[str, Callable[[], str]]] = [
-        ("WebSearch", lambda: _ddg_search(query, max_results=ddg_k, timeout_s=per_tool_timeout_s)),
+        ("WebSearch", lambda: _web_search(query, max_results=ddg_k, timeout_s=per_tool_timeout_s)),
     ]
 
     # Always do Wikipedia (API) if enabled
