@@ -3,7 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import List, Dict, Optional, Callable
 from concurrent.futures import ThreadPoolExecutor, wait
-from urllib.parse import quote
+import os
+import threading
 import time
 import requests
 import xml.etree.ElementTree as ET
@@ -29,11 +30,26 @@ def _truncate(text: str, max_chars: int = 2500) -> str:
     return text[:max_chars] + ("..." if len(text) > max_chars else "")
 
 
-# Use a browser-like UA to avoid Wikimedia blocks
+# Wikimedia's User-Agent policy (https://w.wiki/4wJS) requires a descriptive UA
+# identifying the app plus a contact. Browser-mimicking UAs share a heavily
+# throttled bucket and get 429'd almost immediately; a missing UA gets 403'd.
+_WIKI_CONTACT = os.getenv("WIKI_CONTACT", "https://github.com/hybrid-rag-suite")
 _WIKI_HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) RAGDemo/1.0",
+    "User-Agent": os.getenv("WIKI_USER_AGENT", f"Hybrid-RAG-Suite/1.0 ({_WIKI_CONTACT}) python-requests"),
     "Accept-Language": "en-US,en;q=0.9",
+    "Accept-Encoding": "gzip",
 }
+
+# Reuse connections across calls; also lets us keep one throttle/cache per process.
+_WIKI_SESSION = requests.Session()
+_WIKI_SESSION.headers.update(_WIKI_HEADERS)
+
+# Small in-process TTL cache. Streamlit reruns the script on every interaction,
+# so without this the same query hits the API repeatedly and burns the quota.
+_WIKI_CACHE: Dict[str, tuple[float, str]] = {}
+_WIKI_CACHE_TTL_S = 600.0
+_WIKI_CACHE_MAX = 128
+_WIKI_LOCK = threading.Lock()
 
 
 # ---------- Tool implementations with hard timeouts ----------
@@ -50,34 +66,90 @@ def _ddg_search(query: str, *, max_results: int, timeout_s: float) -> str:
 
 def _wiki_summary(query: str, *, timeout_s: float) -> str:
     """
-    Wikipedia via API (NOT /wiki HTML), so it works even if /wiki is 403.
-    1) Search best title via MediaWiki API
-    2) Fetch summary via REST page/summary
+    Wikipedia via the MediaWiki API (NOT /wiki HTML, which 403s).
+
+    One request does search + intro extract + canonical URL via `generator=search`,
+    instead of the old search-then-REST-summary pair. Halving the request count
+    matters because Wikimedia rate-limits per IP/UA and answers over-quota
+    callers with an immediate 429.
     """
+    key = query.strip().lower()
+    now = time.monotonic()
+    with _WIKI_LOCK:
+        hit = _WIKI_CACHE.get(key)
+        if hit and now - hit[0] < _WIKI_CACHE_TTL_S:
+            return hit[1]
+
     api = "https://en.wikipedia.org/w/api.php"
-    r = requests.get(
-        api,
-        params={"action": "query", "list": "search", "srsearch": query, "format": "json", "srlimit": 1},
-        headers=_WIKI_HEADERS,
-        timeout=timeout_s,
-    )
-    r.raise_for_status()
-    js = r.json()
-    hits = js.get("query", {}).get("search", [])
-    if not hits:
-        return "No Wikipedia results found."
+    params = {
+        "action": "query",
+        "format": "json",
+        "formatversion": 2,
+        "generator": "search",
+        "gsrsearch": query,
+        "gsrlimit": 1,
+        "prop": "extracts|info",
+        "exintro": 1,
+        "explaintext": 1,
+        "exlimit": 1,
+        "inprop": "url",
+        "redirects": 1,
+        "maxlag": 5,
+    }
 
-    title = hits[0]["title"]
+    deadline = now + timeout_s
+    last_err: Optional[str] = None
+    backoff = 0.5
 
-    # REST summary
-    rest = f"https://en.wikipedia.org/api/rest_v1/page/summary/{quote(title)}"
-    r2 = requests.get(rest, headers=_WIKI_HEADERS, timeout=timeout_s)
-    r2.raise_for_status()
-    js2 = r2.json()
+    # Retry 429/503 within the caller's time budget instead of failing outright.
+    for attempt in range(3):
+        remaining = deadline - time.monotonic()
+        if remaining <= 0.3:
+            break
+        r = _WIKI_SESSION.get(api, params=params, timeout=min(remaining, timeout_s))
 
-    extract = js2.get("extract", "") or ""
-    url = (js2.get("content_urls", {}) or {}).get("desktop", {}).get("page", "")
-    return f"Title: {title}\nURL: {url}\n\nSummary:\n{extract}".strip()
+        if r.status_code in (429, 503):
+            last_err = f"{r.status_code} rate-limited by Wikimedia"
+            retry_after = r.headers.get("Retry-After")
+            try:
+                delay = float(retry_after) if retry_after else backoff
+            except ValueError:
+                delay = backoff
+            backoff *= 2
+            if time.monotonic() + delay >= deadline or attempt == 2:
+                break
+            time.sleep(delay)
+            continue
+
+        r.raise_for_status()
+        js = r.json()
+
+        # maxlag rejections come back as 200 with an error body
+        if "error" in js:
+            last_err = js["error"].get("info", str(js["error"]))
+            break
+
+        pages = js.get("query", {}).get("pages", []) or []
+        if not pages:
+            return "No Wikipedia results found."
+
+        page = pages[0]
+        title = page.get("title", "")
+        url = page.get("fullurl", "")
+        extract = (page.get("extract") or "").strip()
+        text = f"""Title: {title}
+URL: {url}
+
+Summary:
+{extract}""".strip()
+
+        with _WIKI_LOCK:
+            if len(_WIKI_CACHE) >= _WIKI_CACHE_MAX:
+                _WIKI_CACHE.clear()
+            _WIKI_CACHE[key] = (time.monotonic(), text)
+        return text
+
+    raise RuntimeError(last_err or "Wikipedia request failed")
 
 
 def _arxiv_query(query: str, *, max_results: int, timeout_s: float) -> str:
