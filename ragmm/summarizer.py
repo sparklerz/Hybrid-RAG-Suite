@@ -44,6 +44,19 @@ def _extract_youtube_id(url: str) -> str | None:
 _YT_SESSION = None
 
 
+class _TimeoutSession(requests.Session):
+    """Session that applies a default timeout to every request.
+
+    youtube_transcript_api issues its own requests with no timeout, so it can
+    block forever on a network that drops packets instead of refusing them.
+    """
+
+    def request(self, method, url, **kwargs):
+        if kwargs.get("timeout") is None:
+            kwargs["timeout"] = _YT_TIMEOUT
+        return super().request(method, url, **kwargs)
+
+
 def _yt_session():
     global _YT_SESSION
     if _YT_SESSION is not None:
@@ -52,14 +65,16 @@ def _yt_session():
     from requests.adapters import HTTPAdapter
     from urllib3.util.retry import Retry
 
-    s = requests.Session()
+    s = _TimeoutSession()
+    # Retries live in _retrying(); urllib3 only covers the cheap status codes,
+    # otherwise the two layers multiply into minutes of hanging.
     retry = Retry(
-        total=4,
-        connect=4,
-        read=3,
-        status=3,
-        backoff_factor=1.0,
-        status_forcelist=(408, 425, 429, 500, 502, 503, 504),
+        total=1,
+        connect=0,
+        read=0,
+        status=1,
+        backoff_factor=0.5,
+        status_forcelist=(429, 500, 502, 503, 504),
         allowed_methods=frozenset(["GET", "POST"]),
         raise_on_status=False,
     )
@@ -89,17 +104,48 @@ def _is_network_error(e: BaseException) -> bool:
                                 "connection reset", "connection aborted", "handshake"))
 
 
-def _retrying(fn, attempts: int = 3, base_delay: float = 1.5):
-    """Run fn(), retrying transient TLS/connection failures with backoff."""
+# Whole-fetch budget. YouTube blocks datacenter IPs by hanging rather than
+# refusing, so without a ceiling the UI just spins.
+_YT_BUDGET = float(os.environ.get("YT_FETCH_TIMEOUT", "45"))
+
+# (connect, read) per HTTP call - kept short so one dead endpoint cannot eat
+# the whole budget.
+_YT_TIMEOUT = (5, 12)
+
+
+class _Budget:
+    """Hard deadline shared by every request in one transcript fetch."""
+
+    def __init__(self, seconds: float = _YT_BUDGET):
+        import time
+
+        self._time = time.monotonic
+        self.deadline = self._time() + seconds
+
+    def left(self) -> float:
+        return self.deadline - self._time()
+
+    def expired(self) -> bool:
+        return self.left() <= 0
+
+
+def _retrying(fn, budget: "_Budget", attempts: int = 2, base_delay: float = 1.0):
+    """Run fn(), retrying transient TLS/connection failures inside the budget."""
     import time
 
     for i in range(attempts):
+        if budget.expired():
+            raise TimeoutError("YouTube caption fetch exceeded its time budget.")
         try:
             return fn()
         except Exception as e:
             if not _is_network_error(e) or i == attempts - 1:
                 raise
-            time.sleep(base_delay * (2 ** i))
+            delay = base_delay * (2 ** i)
+            # Only sleep if there is enough budget left for another attempt.
+            if budget.left() <= delay + _YT_TIMEOUT[0]:
+                raise
+            time.sleep(delay)
 
 
 _UA_DESKTOP = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -147,6 +193,7 @@ def _fetch_youtube_transcript(url: str, preferred_langs: List[str] | None = None
 
     prefs = _lang_prefs(preferred_langs)
     sess = _yt_session()
+    budget = _Budget()
     net_errors: List[Exception] = []
     block_reason: str | None = None
 
@@ -218,6 +265,8 @@ def _fetch_youtube_transcript(url: str, preferred_langs: List[str] | None = None
     def _innertube_tracks() -> List[dict]:
         nonlocal block_reason
         for client, ua, client_id in _INNERTUBE_CLIENTS:
+            if budget.expired():
+                break
             try:
                 def _call(client=client, ua=ua, client_id=client_id):
                     r = sess.post(
@@ -229,12 +278,12 @@ def _fetch_youtube_transcript(url: str, preferred_langs: List[str] | None = None
                                  "X-YouTube-Client-Name": client_id,
                                  "X-YouTube-Client-Version": client["clientVersion"],
                                  "Accept-Language": "en-US,en;q=0.9"},
-                        timeout=25,
+                        timeout=_YT_TIMEOUT,
                     )
                     r.raise_for_status()
                     return r.json()
 
-                player = _retrying(_call)
+                player = _retrying(_call, budget)
             except Exception as e:
                 if _is_network_error(e):
                     net_errors.append(e)
@@ -257,12 +306,12 @@ def _fetch_youtube_transcript(url: str, preferred_langs: List[str] | None = None
                     headers={"User-Agent": _UA_DESKTOP,
                              "Accept-Language": "en-US,en;q=0.9"},
                     cookies={"CONSENT": "YES+cb", "SOCS": "CAI"},
-                    timeout=25,
+                    timeout=_YT_TIMEOUT,
                 )
                 r.raise_for_status()
                 return r.text
 
-            page = _retrying(_call)
+            page = _retrying(_call, budget)
         except Exception as e:
             if _is_network_error(e):
                 net_errors.append(e)
@@ -288,15 +337,17 @@ def _fetch_youtube_transcript(url: str, preferred_langs: List[str] | None = None
 
     def _download(track: dict) -> str:
         for suffix in ("&fmt=json3", ""):
+            if budget.expired():
+                break
             try:
                 def _call(u=track["baseUrl"] + suffix):
                     r = sess.get(u, headers={"User-Agent": _UA_DESKTOP,
                                              "Accept-Language": "en-US,en;q=0.9"},
-                                 timeout=25)
+                                 timeout=_YT_TIMEOUT)
                     r.raise_for_status()
                     return r.text or ""
 
-                text = _parse_timedtext(_retrying(_call))
+                text = _parse_timedtext(_retrying(_call, budget))
                 if text:
                     return text
             except Exception as e:
@@ -305,6 +356,8 @@ def _fetch_youtube_transcript(url: str, preferred_langs: List[str] | None = None
         return ""
 
     for discover in (_innertube_tracks, _watchpage_tracks):
+        if budget.expired():
+            break
         tracks = discover()
         if not tracks:
             continue
@@ -312,15 +365,22 @@ def _fetch_youtube_transcript(url: str, preferred_langs: List[str] | None = None
             text = _download(tr)
             if text:
                 return text
+            if budget.expired():
+                break
 
     # ------------------------------------------------------------
     # last resort: youtube_transcript_api (scrapes youtube.com directly)
     # ------------------------------------------------------------
-    if YouTubeTranscriptApi is not None:
+    if YouTubeTranscriptApi is not None and not budget.expired():
         try:
-            fetched = _retrying(
-                lambda: YouTubeTranscriptApi().fetch(vid, languages=preferred_langs)
-            )
+            def _fetch_via_lib():
+                try:
+                    api = YouTubeTranscriptApi(http_client=sess)
+                except TypeError:  # older releases lack http_client
+                    api = YouTubeTranscriptApi()
+                return api.fetch(vid, languages=preferred_langs)
+
+            fetched = _retrying(_fetch_via_lib, budget, attempts=1)
             text = "\n".join(s.text for s in fetched if getattr(s, "text", None)).strip()
             if text:
                 return text
@@ -338,13 +398,17 @@ def _fetch_youtube_transcript(url: str, preferred_langs: List[str] | None = None
             elif not block_reason:
                 block_reason = str(e)
 
-    if net_errors:
-        last = net_errors[-1]
+    if net_errors or budget.expired():
+        detail = ""
+        if net_errors:
+            last = net_errors[-1]
+            detail = f" Last error: {type(last).__name__}: {str(last)[:200]}"
         raise RuntimeError(
-            "Could not reach YouTube to download captions - the connection kept failing "
-            f"({type(last).__name__}: {last}). This is usually YouTube rejecting requests "
-            "from this IP address. Retry in a moment, or set the YT_PROXY environment "
-            "variable to route caption requests through a proxy."
+            "Could not reach YouTube to download captions within "
+            f"{_YT_BUDGET:.0f}s.{detail} This host is most likely blocked by YouTube "
+            "(common on cloud/datacenter IPs such as Hugging Face Spaces). "
+            "Set the YT_PROXY environment variable to route caption requests through "
+            "a residential proxy, or raise YT_FETCH_TIMEOUT if the network is just slow."
         )
 
     if block_reason:
