@@ -1,0 +1,10 @@
+[server]
+# Streamlit builds its Tornado app with xsrf_cookies=True by default, so every
+# /_stcore/upload_file request must carry the _streamlit_xsrf cookie. On Hugging
+# Face Spaces the app is framed from *.hf.space inside huggingface.co, which makes
+# that cookie third-party — the browser withholds it and st.file_uploader gets a 403.
+enableXsrfProtection = false
+enableCORS = false
+
+headless = true
+maxUploadSize = 200
