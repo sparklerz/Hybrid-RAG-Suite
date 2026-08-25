@@ -11,17 +11,33 @@ from langchain_core.output_parsers import StrOutputParser
 from langchain_community.chat_message_histories import ChatMessageHistory
 import re
 import requests
+from concurrent.futures import ThreadPoolExecutor
 
-KURAL_LINE_RE = re.compile(r"(?m)^\s*(\d{1,4})\s*[.)]?\s*$")
-KURAL_TOKEN_RE = re.compile(r"(?<!\d)(\d{1,4})(?!\d)")
+KURAL_NUM_LINE_RE = re.compile(r"^\s*(\d{1,4})\s*[.)]?\s*$")  # e.g. "606" alone on a line
 KURAL_HEAD_RE = re.compile(r"(?m)^\s*(\d{1,4})\s*[.)]\s+")  # e.g. "15.  'Tis rain works..."
 KURAL_WORD_RE = re.compile(r"(?i)\b(?:kural|couplet)\s*#?\s*(\d{1,4})\b")  # e.g. "Kural 103:"
 
-def _extract_kural_nums(text: str, max_n: int = 3) -> List[int]:
+def _extract_kural_nums(text: str, max_n: int = 6) -> List[int]:
     text = text or ""
     nums: List[int] = []
 
-    # Prefer "15. <text>" style (your English KB PDF format)
+    # Main KB PDF format: the number sits alone on a line directly above its
+    # couplet. Page numbers look identical but are followed by a blank line,
+    # so require the next line to carry text.
+    lines = text.splitlines()
+    for i, line in enumerate(lines):
+        m = KURAL_NUM_LINE_RE.match(line)
+        if not m:
+            continue
+        n = int(m.group(1))
+        if not (1 <= n <= 1330):
+            continue
+        nxt = lines[i + 1] if i + 1 < len(lines) else ""
+        if not nxt.strip():
+            continue
+        nums.append(n)
+
+    # Also accept "15. <text>" style
     for m in KURAL_HEAD_RE.finditer(text):
         n = int(m.group(1))
         if 1 <= n <= 1330:
@@ -72,9 +88,17 @@ def _build_tamil_map_from_nums(nums: List[int]) -> str:
     line1
     line2
     """
+    nums = list(nums or [])
+    if not nums:
+        return ""
+
+    # Fetch in parallel; sequential lookups add seconds of latency per couplet.
+    with ThreadPoolExecutor(max_workers=min(8, len(nums))) as pool:
+        tamil_by_num = dict(zip(nums, pool.map(_fetch_kural_tamil_from_api, nums)))
+
     out: List[str] = []
-    for n in (nums or []):
-        api_tamil = _fetch_kural_tamil_from_api(n)
+    for n in nums:
+        api_tamil = tamil_by_num.get(n, "")
         if _looks_like_tamil(api_tamil):
             out.append(f"[{n}]\n{api_tamil}".strip())
     return "\n\n".join(out).strip()
@@ -232,7 +256,7 @@ def make_conversational_rag(
         | RunnablePassthrough.assign(**{"context_docs": retrieve_from_question})
         | RunnablePassthrough.assign(context=lambda x: _format_docs(x["context_docs"]))
         # | RunnablePassthrough.assign(tamil_snippets=lambda x: _build_tamil_snippets(x, style, retriever))
-        | RunnablePassthrough.assign(kural_numbers=lambda x: _extract_kural_nums(x.get("context",""), max_n=12))
+        | RunnablePassthrough.assign(kural_numbers=lambda x: _extract_kural_nums(x.get("context",""), max_n=6))
         | RunnablePassthrough.assign(tamil_map=lambda x: _build_tamil_map_from_nums(x["kural_numbers"]))
         | {"answer": qa_prompt | llm | parser, "context": lambda x: x["context_docs"]}
     )
