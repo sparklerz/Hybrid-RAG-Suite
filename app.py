@@ -168,9 +168,12 @@ if prev_page != page:
 
 st.sidebar.subheader("Global Settings")
 GROQ_MODELS = [
+    "qwen/qwen3.8-27b",
     "openai/gpt-oss-120b",
-    "openai/gpt-oss-20b",
     "qwen/qwen3.6-27b",
+    "llama-3.3-70b-versatile",
+    "openai/gpt-oss-20b",
+    "llama-3.1-8b-instant",
 ]
 
 default_model = settings.llm_model

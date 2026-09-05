@@ -121,7 +121,7 @@ GROQ_API_KEY=your_key_here
 TAVILY_API_KEY=your_key_here
 
 # Optional
-LLM_MODEL=openai/gpt-oss-120b
+LLM_MODEL=qwen/qwen3.8-27b
 EMBED_PROVIDER=huggingface
 HF_TOKEN=your_token_here
 CHROMA_DIR=./data/chroma
@@ -144,7 +144,7 @@ streamlit run app.py
 | Variable | Default | Purpose |
 |---|---:|---|
 | `GROQ_API_KEY` | (none) | **Required**. Enables Groq LLM calls |
-| `LLM_MODEL` | `openai/gpt-oss-120b` | Default Groq model |
+| `LLM_MODEL` | `qwen/qwen3.8-27b` | Default Groq model |
 | `EMBED_PROVIDER` | `huggingface` | Embeddings provider (currently HF only) |
 | `HF_TOKEN` | (none) | Optional Hugging Face token |
 | `TAVILY_API_KEY` | (none) | Web search provider. Unset falls back to `ddgs`, unreliable on hosted platforms |

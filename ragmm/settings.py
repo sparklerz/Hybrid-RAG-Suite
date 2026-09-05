@@ -13,7 +13,7 @@ class Settings:
 
     # LLM
     groq_api_key: str | None = os.getenv("GROQ_API_KEY")
-    llm_model: str = os.getenv("LLM_MODEL", "openai/gpt-oss-120b")
+    llm_model: str = os.getenv("LLM_MODEL", "qwen/qwen3.8-27b")
 
     # Embeddings
     embed_provider: str = os.getenv("EMBED_PROVIDER", "huggingface")  # huggingface|openai
