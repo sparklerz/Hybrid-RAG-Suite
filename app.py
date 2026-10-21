@@ -962,7 +962,7 @@ elif page == "Summarizer":
 
 elif page == "RAG Evaluation":
     st.title("📈 RAG Evaluation")
-    st.write("Evaluate retriever performance (Hit@K, MRR) using your current Retriever Mode / Reranker settings.")
+    st.write("Evaluate retriever performance (Hit@K, Recall@K, Precision@K, MRR, MAP@K, nDCG@K) using your current Retriever Mode / Reranker settings.")
 
     from ragmm.eval import load_eval_examples_from_json, evaluate_retriever
 
@@ -997,14 +997,26 @@ elif page == "RAG Evaluation":
                     retriever = make_retriever(eval_collection)
                     report = evaluate_retriever(retriever, examples, k=k)
 
-                    st.metric("Hit@K", f"{report['hit_at_k']:.2%}")
-                    st.metric("MRR", f"{report['mrr']:.3f}")
+                    m1, m2, m3 = st.columns(3)
+                    m1.metric("Hit@K", f"{report['hit_at_k']:.2%}")
+                    m2.metric("Recall@K", f"{report['recall_at_k']:.2%}")
+                    m3.metric("Precision@K", f"{report['precision_at_k']:.2%}")
+                    m4, m5, m6 = st.columns(3)
+                    m4.metric("MRR", f"{report['mrr']:.3f}")
+                    m5.metric("MAP@K", f"{report['map_at_k']:.3f}")
+                    m6.metric("nDCG@K", f"{report['ndcg_at_k']:.3f}")
+                    st.caption("Substring ('expected') examples treat the text as one target, so Recall@K equals Hit@K for them.")
 
                     st.subheader("Per-question results")
                     for i, row in enumerate(report["rows"], start=1):
                         with st.expander(f"#{i} {'✅' if row['hit'] else '❌'}  {row['question'][:80]}"):
                             st.write("**Hit:**", row["hit"])
                             st.write("**Reciprocal rank:**", row["rr"])
+                            st.write("**Recall:**", round(row["recall"], 3))
+                            st.write("**Precision:**", round(row["precision"], 3))
+                            st.write("**Average precision:**", round(row["ap"], 3))
+                            st.write("**nDCG:**", round(row["ndcg"], 3))
+                            st.write("**Relevance by rank:**", row["relevance"])
                             st.write("**Top sources:**", row["top_sources"])
 
             except Exception as e:

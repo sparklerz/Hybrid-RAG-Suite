@@ -46,8 +46,13 @@ A multi-page **Streamlit** “RAG app” for experimenting with **dense**, **spa
 ### 5) RAG Evaluation
 - Quick metrics for a chosen retriever:
   - **Hit@K**
+  - **Recall@K**
+  - **Precision@K**
   - **MRR**
+  - **MAP@K**
+  - **nDCG@K** (binary relevance)
 - Supports simple substring expectations or chunk-id based gold labels
+  - With substring expectations the total number of relevant chunks is unknown, so Recall@K equals Hit@K and MAP/nDCG are normalized by the relevant chunks actually retrieved
 
 ### 6) Collection Manager
 - List / delete Chroma collections
