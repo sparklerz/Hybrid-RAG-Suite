@@ -3,6 +3,7 @@ import re
 from typing import List
 from rank_bm25 import BM25Okapi
 from langchain_core.documents import Document
+from langsmith import traceable
 
 from .settings import Settings
 from .artifacts import load_docstore, load_bm25_cache, save_bm25_cache
@@ -42,6 +43,7 @@ class BM25Retriever:
         self._chunk_ids = chunk_ids
         self._bm25 = BM25Okapi(tokenized)
 
+    @traceable(name="bm25", run_type="retriever")
     def invoke(self, query: str) -> List[Document]:
         if not self._bm25 or not self._docs:
             return []

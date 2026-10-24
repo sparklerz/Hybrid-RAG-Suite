@@ -1,6 +1,7 @@
 from __future__ import annotations
 from typing import List, Dict
 from langchain_core.documents import Document
+from langsmith import traceable
 
 
 def _get_chunk_id(d: Document) -> str:
@@ -35,6 +36,7 @@ class HybridRetriever:
         self.w_dense = w_dense
         self.w_bm25 = w_bm25
 
+    @traceable(name="hybrid_rrf", run_type="retriever")
     def invoke(self, query: str) -> List[Document]:
         dense_docs = self.dense.invoke(query) if hasattr(self.dense, "invoke") else self.dense.get_relevant_documents(query)
         bm25_docs = self.bm25.invoke(query)

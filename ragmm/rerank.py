@@ -2,6 +2,7 @@ from __future__ import annotations
 from typing import List, Optional
 
 from langchain_core.documents import Document
+from langsmith import traceable
 
 
 class CrossEncoderReranker:
@@ -17,6 +18,7 @@ class CrossEncoderReranker:
         self.model_name = model_name
         self.model = CrossEncoder(model_name)
 
+    @traceable(name="cross_encoder_rerank")
     def rerank(self, query: str, docs: List[Document], top_k: int) -> List[Document]:
         if not docs:
             return []
@@ -49,6 +51,7 @@ class RerankRetriever:
         self.fetch_k = fetch_k
         self.top_k = top_k
 
+    @traceable(name="rerank_retriever", run_type="retriever")
     def invoke(self, query: str) -> List[Document]:
         docs = self.base.invoke(query) if hasattr(self.base, "invoke") else self.base.get_relevant_documents(query)
         docs = docs[: self.fetch_k]

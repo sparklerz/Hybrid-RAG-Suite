@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import time
 import streamlit as st
+from langsmith.utils import tracing_is_enabled
 from langchain_community.chat_message_histories import ChatMessageHistory
 
 from ragmm.settings import Settings
@@ -215,6 +216,8 @@ settings = Settings(
 )
 
 st.sidebar.caption(f"Chroma DB: {settings.chroma_dir}")
+if tracing_is_enabled():
+    st.sidebar.caption(f"LangSmith tracing: on (project `{os.getenv('LANGSMITH_PROJECT', 'default')}`)")
 
 @st.cache_resource
 def _reranker_cached(model_name: str):
@@ -255,6 +258,19 @@ def make_retriever(collection_name: str):
         return RerankRetriever(base, rr, fetch_k=fetch_k, top_k=rerank_top_k)
 
     return base
+
+
+def trace_config(run_name: str, collection: str) -> dict:
+    """LangSmith run name + metadata, so traces can be filtered by retrieval setup."""
+    return {
+        "run_name": run_name,
+        "metadata": {
+            "collection": collection,
+            "retriever_mode": retriever_mode,
+            "reranker": rerank_model if use_reranker else None,
+            "llm_model": llm_model,
+        },
+    }
 
 def _kb_chat_label(sid: str) -> str:
     parts = (sid or "").split("::")
@@ -506,7 +522,10 @@ if page == "Document Chat (Uploads)":
                 with st.spinner("Thinking..."):
                     out = convo.invoke(
                         {"input": prompt},
-                        config={"configurable": {"session_id": uploads_sid}},
+                        config={
+                            "configurable": {"session_id": uploads_sid},
+                            **trace_config("document_chat", active_docset),
+                        },
                     )
 
                 answer_slot.write(out.get("answer", ""))
@@ -689,7 +708,10 @@ elif page == "Knowledge Base":
                 with st.spinner("Thinking..."):
                     convo.invoke(
                         {"input": prompt},
-                        config={"configurable": {"session_id": kb_sid}},
+                        config={
+                            "configurable": {"session_id": kb_sid},
+                            **trace_config("knowledge_base_chat", kb_collection),
+                        },
                     )
             st.rerun()
 

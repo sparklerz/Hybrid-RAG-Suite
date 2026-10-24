@@ -4,6 +4,7 @@ python-dotenv>=1.0
 langchain==1.2.0
 langchain-community==0.4.1
 langchain-core==1.2.4
+langsmith
 
 langchain-groq>=0.1.9
 langchain-huggingface>=0.0.3

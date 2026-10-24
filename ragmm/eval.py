@@ -5,6 +5,7 @@ import json
 import math
 
 from langchain_core.documents import Document
+from langsmith import traceable
 
 
 @dataclass
@@ -130,6 +131,12 @@ def _rank_metrics(rels: List[int], n_relevant: Optional[int], k: int) -> Dict[st
     }
 
 
+# One trace per evaluation run, with each question's retrieval nested under it.
+# The retriever object itself is left out of the trace inputs.
+@traceable(
+    name="retriever_eval",
+    process_inputs=lambda i: {"questions": [ex.question for ex in i["examples"]], "k": i.get("k")},
+)
 def evaluate_retriever(
     retriever,
     examples: List[EvalExample],

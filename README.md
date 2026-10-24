@@ -144,6 +144,36 @@ streamlit run app.py
 
 ---
 
+## Observability (LangSmith)
+
+Tracing is off unless these are set (in `.env`, or as Space secrets/variables):
+
+```bash
+LANGSMITH_TRACING="true"
+LANGSMITH_API_KEY="lsv2_..."
+LANGSMITH_PROJECT="hybrid-rag-suite"
+```
+
+Every chat request then appears in LangSmith as one trace:
+
+```
+document_chat / knowledge_base_chat        metadata: collection, retriever_mode, reranker, llm_model
+├─ question rewrite (LLM)
+├─ rerank_retriever                        (when the reranker is on)
+│  ├─ hybrid_rrf
+│  │  ├─ dense (Chroma)
+│  │  └─ bm25
+│  └─ cross_encoder_rerank
+└─ answer (LLM)
+```
+
+The custom retrievers are plain classes, so they are traced with `@traceable`
+(`ragmm/hybrid_retriever.py`, `ragmm/bm25_retriever.py`, `ragmm/rerank.py`).
+**RAG Evaluation** runs are grouped into a single `retriever_eval` trace.
+Traces include the question and retrieved chunk text.
+
+---
+
 ## Configuration reference
 
 | Variable | Default | Purpose |
@@ -160,6 +190,9 @@ streamlit run app.py
 | `CHUNK_SIZE` | `1000` | Chunk size for splitting |
 | `CHUNK_OVERLAP` | `200` | Chunk overlap |
 | `TOP_K` | `5` | Retrieval top-k |
+| `LANGSMITH_TRACING` | (off) | Set `true` to send traces to LangSmith |
+| `LANGSMITH_API_KEY` | (none) | LangSmith API key |
+| `LANGSMITH_PROJECT` | `default` | LangSmith project traces are logged under |
 
 ---
 
